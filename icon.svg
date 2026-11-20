@@ -1,0 +1,11 @@
+<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M10.5 22.5v-3.5M18 22.5v-9.5M25.5 22.5v-6" stroke="url(#usage-dashboard-bars)" stroke-width="4.2" stroke-linecap="round" />
+  <path d="M7 27.5h22" stroke="#658EFF" stroke-width="2.4" stroke-linecap="round" />
+  <defs>
+    <linearGradient id="usage-dashboard-bars" x1="9" y1="24" x2="27" y2="10" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#41E1AC" />
+      <stop offset="0.6" stop-color="#658EFF" />
+      <stop offset="1" stop-color="#41E1AC" />
+    </linearGradient>
+  </defs>
+</svg>
