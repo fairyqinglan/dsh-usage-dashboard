@@ -284,17 +284,82 @@ function stateFromView(view) {
   return state
 }
 
+/** @returns true when `value` is a `YYYY-MM-DD` calendar day. */
+function isDayKey(value) {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+}
+
+/**
+ * Resolve a window into `{ start, end, days }`. `days` is the trailing window
+ * ending today; an explicit `{ start, end }` selects an absolute range. Both
+ * are clamped to the retention window so a request cannot reach older logs.
+ */
+function resolveWindow({ days = 30, start, end } = {}, offset = hostDayOffsetMinutes(), now = Date.now()) {
+  const today = dateKeyOf(now, offset)
+  const earliest = dateKeyOf(now - (RETENTION_DAYS - 1) * DAY_MS, offset)
+  if (isDayKey(start) || isDayKey(end)) {
+    const from = isDayKey(start) && start >= earliest ? start : earliest
+    const to = isDayKey(end) && end <= today && end >= from ? end : today
+    return { start: from, end: to, days: 0 }
+  }
+  const span = Math.min(RETENTION_DAYS, Math.max(1, Math.trunc(days)))
+  return { start: dateKeyOf(now - (span - 1) * DAY_MS, offset), end: today, days: span }
+}
+
+/**
+ * Split a route key once per distinct model; the same key appears on every day
+ * row of a session, so caching the split removes thousands of string ops on a
+ * large fold without changing the data.
+ */
+function routeParts(key, cache) {
+  let parts = cache.get(key)
+  if (parts === undefined) {
+    // Preserve the original `split(SEP)[0]` / `[1]` semantics exactly: a key
+    // with no separator reads (key, 'unknown'); any extra separators are
+    // ignored. Splitting once per distinct key and caching the result keeps
+    // the old behaviour while removing the repeated work on every day row.
+    const cut = key.indexOf(MODEL_SEP)
+    const provider = cut < 0 ? (key || 'unknown') : (key.slice(0, cut) || 'unknown')
+    const rest = cut < 0 ? '' : key.slice(cut + 1)
+    const second = rest.indexOf(MODEL_SEP)
+    const model = cut < 0
+      ? 'unknown'
+      : (second < 0 ? (rest || 'unknown') : (rest.slice(0, second) || 'unknown'))
+    parts = { provider, model }
+    cache.set(key, parts)
+  }
+  return parts
+}
+
+/** Reduce fold states to the window's total tokens and calls — used for deltas. */
+function windowTotals(states, start, end) {
+  let total = 0
+  let calls = 0
+  for (const state of states) {
+    if (state === undefined) continue
+    for (const [day, table] of Object.entries(state.days)) {
+      if (day < start || day > end) continue
+      for (const bucket of Object.values(table)) {
+        total += bucket.input + bucket.output + bucket.cacheRead + bucket.cacheWrite
+        calls += bucket.calls
+      }
+    }
+  }
+  return { total, calls }
+}
+
 /**
  * Merge per-session folds into the dashboard payload.
  * @param states - fold state per counted session.
- * @param options - requested window in days.
+ * @param options - `{ days }` trailing window, or `{ start, end }` absolute range.
  */
-export function summarize(states, { days = 30 } = {}) {
-  const windowDays = Math.min(RETENTION_DAYS, Math.max(1, Math.trunc(days)))
+export function summarize(states, options = {}) {
   const offset = hostDayOffsetMinutes()
   const now = Date.now()
-  const today = dateKeyOf(now, offset)
-  const windowStart = dateKeyOf(now - (windowDays - 1) * DAY_MS, offset)
+  const window = resolveWindow(options, offset, now)
+  const { start: windowStart, end: today } = window
+  const windowDays = window.days
+  const keys = new Map()
   const models = new Map()
   const dayRows = new Map()
   let calls = 0
@@ -305,19 +370,18 @@ export function summarize(states, { days = 30 } = {}) {
       if (day < windowStart || day > today) continue
       for (const [key, bucket] of Object.entries(table)) {
         calls += bucket.calls
-        const model = models.get(key) ?? {
-          key,
-          provider: key.split(MODEL_SEP)[0] ?? 'unknown',
-          model: key.split(MODEL_SEP)[1] ?? 'unknown',
+        const { provider, model } = routeParts(key, keys)
+        const entry = models.get(key) ?? {
+          key, provider, model,
           input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0, lastDay: '',
         }
-        model.input += bucket.input
-        model.output += bucket.output
-        model.cacheRead += bucket.cacheRead
-        model.cacheWrite += bucket.cacheWrite
-        model.calls += bucket.calls
-        if (day > model.lastDay) model.lastDay = day
-        models.set(key, model)
+        entry.input += bucket.input
+        entry.output += bucket.output
+        entry.cacheRead += bucket.cacheRead
+        entry.cacheWrite += bucket.cacheWrite
+        entry.calls += bucket.calls
+        if (day > entry.lastDay) entry.lastDay = day
+        models.set(key, entry)
 
         const row = dayRows.get(day) ?? { day, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0, models: [] }
         row.input += bucket.input
@@ -326,9 +390,7 @@ export function summarize(states, { days = 30 } = {}) {
         row.cacheWrite += bucket.cacheWrite
         row.calls += bucket.calls
         row.models.push({
-          key,
-          provider: key.split(MODEL_SEP)[0] ?? 'unknown',
-          model: key.split(MODEL_SEP)[1] ?? 'unknown',
+          key, provider, model,
           input: bucket.input,
           output: bucket.output,
           cacheRead: bucket.cacheRead,
@@ -373,6 +435,45 @@ export function summarize(states, { days = 30 } = {}) {
     },
     models: modelRows,
     days: dayList,
+  }
+}
+
+/**
+ * Period-over-period and year-over-year comparison for a trailing window.
+ * Returns raw prior totals plus relative change so the UI can render arrows.
+ */
+export function comparePeriods(states, days = 30) {
+  const offset = hostDayOffsetMinutes()
+  const now = Date.now()
+  const span = Math.min(RETENTION_DAYS, Math.max(1, Math.trunc(days)))
+  const today = dateKeyOf(now, offset)
+  const currentStart = dateKeyOf(now - (span - 1) * DAY_MS, offset)
+  const previousEnd = dateKeyOf(now - span * DAY_MS, offset)
+  const previousStart = dateKeyOf(now - (2 * span - 1) * DAY_MS, offset)
+  const lastYearEnd = dateKeyOf(now - (365 + span) * DAY_MS, offset)
+  const lastYearStart = dateKeyOf(now - (365 + 2 * span - 1) * DAY_MS, offset)
+  const current = windowTotals(states, currentStart, today)
+  const previous = windowTotals(states, previousStart, previousEnd)
+  const lastYear = lastYearStart < dateKeyOf(now - (RETENTION_DAYS - 1) * DAY_MS, offset)
+    ? { total: 0, calls: 0, unavailable: true }
+    : windowTotals(states, lastYearStart, lastYearEnd)
+  const delta = (value, prior, unavailable = false) => ({
+    value,
+    prior,
+    change: prior === 0 ? (value === 0 ? 0 : null) : (value - prior) / prior,
+    ...(unavailable ? { unavailable: true } : {}),
+  })
+  return {
+    days: span,
+    currentStart,
+    currentEnd: today,
+    previousStart,
+    previousEnd,
+    lastYearStart,
+    lastYearEnd,
+    total: delta(current.total, previous.total),
+    calls: delta(current.calls, previous.calls),
+    yearOverYear: delta(current.total, lastYear.total, lastYear.unavailable === true),
   }
 }
 
@@ -467,13 +568,25 @@ export async function apply(ctx) {
   }
 
   /** Fold one stored session from its durable log; the last resort for cold data. */
-  async function foldStored(header) {
+  async function foldStored(header, eventCount) {
     let handle = undefined
     try {
       handle = await persistence.open(header.id, 'read')
-      // Bounded read: a pathologically large log folds its newest events only,
-      // which is exactly what the retention window can display anyway.
-      const read = await handle.read(0, COLD_READ_MAX_EVENTS)
+      // Read the newest events only: a bounded fold of the retention window's
+      // tail. `read(0, N)` returns the OLDEST N events and silently misses all
+      // recent usage on a large log — the opposite of what the dashboard needs.
+      // The log's exact length comes from `snapshot.eventCount` (cheap metadata)
+      // when available; otherwise one unbounded read supplies the length and is
+      // reused when it already fits the bound.
+      const known = Number.isFinite(eventCount) ? Math.max(0, Math.trunc(eventCount)) : undefined
+      const full = known === undefined || known <= COLD_READ_MAX_EVENTS ? await handle.read() : undefined
+      const totalEvents = known ?? (full.events.length === 0
+        ? 0
+        : integerOr(full.events[full.events.length - 1].seq, full.events.length - 1) + 1)
+      const start = Math.max(0, totalEvents - COLD_READ_MAX_EVENTS)
+      const read = full !== undefined
+        ? full
+        : await handle.read(start, COLD_READ_MAX_EVENTS)
       // The handle's exact inherited cut is what keeps a fork child from
       // counting its parent's already-counted calls a second time.
       const state = foldAll(initialDayState(handle.inheritedEventCount), read.events)
@@ -525,7 +638,7 @@ export async function apply(ctx) {
         if (Date.now() - startedAt > REFRESH_BUDGET_MS) return
         const snapshot = missing[cursor++]
         if (snapshot === undefined) return
-        await foldStored(snapshot.header)
+        await foldStored(snapshot.header, snapshot.eventCount)
         if (cursor < missing.length) await yieldEventLoop()
       }
     }
@@ -554,33 +667,85 @@ export async function apply(ctx) {
     return [...attachedStates(), ...[...cold.values()].map(entry => entry.state)]
   }
 
-  const route = '/api/token-usage-dashboard/summary'
-  ctx.effect(() => ctx.webServer.register({
-    kind: 'exact',
-    path: route,
-    handler: async (req, res) => {
-      const rejection = ctx.connection.requestRejection(req)
-      if (rejection !== undefined) {
-        res.statusCode = rejection
-        res.end()
-        return
-      }
-      if (req.method !== 'GET') {
-        res.statusCode = 405
-        res.setHeader('allow', 'GET')
-        res.end()
-        return
-      }
-      const url = new URL(String(req.url), 'http://localhost')
-      const days = Math.min(RETENTION_DAYS, Math.max(1, whole(Number(url.searchParams.get('days'))) || 30))
-      try {
-        sendJson(res, 200, summarize(await states({ force: url.searchParams.get('refresh') === '1' }), { days }))
-      } catch (error) {
-        ctx.logger.warn(`usage-dashboard: summary failed: ${String(error?.message ?? error)}`)
-        sendJson(res, 500, { code: 'usage-dashboard/summary-failed', message: String(error?.message ?? error) })
-      }
-    },
-  }), `usage-dashboard: GET ${route}`)
+  /**
+   * Build a summary from the query: `days=N` trailing window, or an absolute
+   * `from`/`to` range; `compare=1` adds period/year comparisons.
+   */
+  async function buildSummary(url) {
+    const days = Math.min(RETENTION_DAYS, Math.max(1, whole(Number(url.searchParams.get('days'))) || 30))
+    const from = url.searchParams.get('from')
+    const to = url.searchParams.get('to')
+    const options = isDayKey(from) || isDayKey(to) ? { start: from, end: to } : { days }
+    const data = await states({ force: url.searchParams.get('refresh') === '1' })
+    const summary = summarize(data, options)
+    if (url.searchParams.get('compare') === '1' && (isDayKey(from) || isDayKey(to)) === false) {
+      const compareDays = Math.min(RETENTION_DAYS, Math.max(1, whole(Number(url.searchParams.get('compareDays'))) || days))
+      summary.comparison = comparePeriods(data, compareDays)
+    }
+    return summary
+  }
 
-  ctx.logger.info('usage-dashboard: daily token usage mounted at /api/token-usage-dashboard/summary')
+  /** CSV escaping: quote any field containing a comma, quote or newline. */
+  function csvCell(value) {
+    const text = String(value ?? '')
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+  }
+
+  /** Generate one CSV attachment from a summary's day/model rows. */
+  function csvOf(summary) {
+    const head = ['day', 'provider', 'model', 'input', 'output', 'cacheRead', 'cacheWrite', 'calls', 'total']
+    const lines = [head.join(',')]
+    for (const row of summary.days) {
+      for (const item of row.models) {
+        lines.push([
+          row.day, item.provider, item.model,
+          item.input, item.output, item.cacheRead, item.cacheWrite, item.calls, item.total,
+        ].map(csvCell).join(','))
+      }
+    }
+    return lines.join('\r\n') + '\r\n'
+  }
+
+  const route = '/api/token-usage-dashboard/summary'
+  const exportRoute = '/api/token-usage-dashboard/export'
+  const handler = async (req, res) => {
+    const rejection = ctx.connection.requestRejection(req)
+    if (rejection !== undefined) {
+      res.statusCode = rejection
+      res.end()
+      return
+    }
+    if (req.method !== 'GET') {
+      res.statusCode = 405
+      res.setHeader('allow', 'GET')
+      res.end()
+      return
+    }
+    const url = new URL(String(req.url), 'http://localhost')
+    try {
+      const summary = await buildSummary(url)
+      if (req.path === exportRoute || url.pathname === exportRoute) {
+        const format = url.searchParams.get('format') === 'json' ? 'json' : 'csv'
+        const stamp = summary.today
+        if (format === 'json') {
+          res.setHeader('content-type', 'application/json; charset=utf-8')
+          res.setHeader('content-disposition', `attachment; filename="token-usage-${stamp}.json"`)
+          res.end(JSON.stringify(summary, null, 2))
+        } else {
+          res.setHeader('content-type', 'text/csv; charset=utf-8')
+          res.setHeader('content-disposition', `attachment; filename="token-usage-${stamp}.csv"`)
+          res.end(csvOf(summary))
+        }
+        return
+      }
+      sendJson(res, 200, summary)
+    } catch (error) {
+      ctx.logger.warn(`usage-dashboard: request failed: ${String(error?.message ?? error)}`)
+      sendJson(res, 500, { code: 'usage-dashboard/request-failed', message: String(error?.message ?? error) })
+    }
+  }
+  ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: route, handler }), `usage-dashboard: GET ${route}`)
+  ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: exportRoute, handler }), `usage-dashboard: GET ${exportRoute}`)
+
+  ctx.logger.info('usage-dashboard: daily token usage mounted at /api/token-usage-dashboard/summary and /export')
 }

@@ -1,9 +1,13 @@
 {
   "name": "@local/dsh-usage-dashboard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "Daily token usage with a per-model breakdown for the DeepSeek Harness",
+  "scripts": {
+    "test": "node test/fold-test.mjs && node test/features-test.mjs && node test/review-check.cjs && node test/client-smoke.cjs",
+    "check": "node --check index.js && node --check client.js"
+  },
   "main": "./index.js",
   "exports": {
     ".": "./index.js",
@@ -19,9 +23,26 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "test/*.mjs",
+    "test/*.cjs"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fairyqinglan/dsh-usage-dashboard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/fairyqinglan/dsh-usage-dashboard/issues"
+  },
+  "homepage": "https://github.com/fairyqinglan/dsh-usage-dashboard#readme",
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "cordis-plugin",
+    "token-usage",
+    "usage-dashboard"
+  ],
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

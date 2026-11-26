@@ -30,6 +30,13 @@ window.__ModuleLoader__.load({
         return '/api/token-usage-dashboard/summary'
       }
     })()
+    const EXPORT_API = (() => {
+      try {
+        return new URL('api/token-usage-dashboard/export', document.baseURI).pathname
+      } catch {
+        return '/api/token-usage-dashboard/export'
+      }
+    })()
 
     /* ------------------------------------------------------------------ copy */
 
@@ -45,6 +52,10 @@ window.__ModuleLoader__.load({
         'panel.refresh': 'Refresh',
         'panel.close': 'Close',
         'panel.days14': 'Last 14 days',
+        'panel.selectDay': 'Click the chart to inspect a day',
+        'panel.clear': 'Clear selection',
+        'panel.dayView': 'Day view',
+        'panel.allView': '14-day total',
         'panel.full': 'Full report: Settings → Usage statistics',
         'page.title': 'Usage statistics',
         'page.badge': 'Token usage',
@@ -55,14 +66,33 @@ window.__ModuleLoader__.load({
         'strip.bestStreak': 'Longest streak',
         'strip.days': 'days',
         'heat.title': 'Token activity',
-        'heat.daily': 'Daily',
-        'heat.weekly': 'Weekly',
-        'heat.cumulative': 'Cumulative',
         'heat.less': 'Less',
         'heat.more': 'More',
+        'heat.pick': 'Click a day to see its model breakdown',
+        'dist.title': 'Token distribution',
+        'dist.today': 'Today',
+        'dist.day': 'Distribution',
+        'dist.none': 'No usage on this day',
+        'dist.clear': 'Back to today',
         'range.title': 'Time range',
         'range.7': 'Last 7 days',
         'range.30': 'Last 30 days',
+        'range.90': 'Last 90 days',
+        'range.custom': 'Custom',
+        'range.from': 'From',
+        'range.to': 'To',
+        'range.apply': 'Apply',
+        'range.invalid': 'Use valid dates within the window.',
+        'compare.title': 'Period comparison',
+        'compare.previous': 'vs previous period',
+        'compare.lastYear': 'vs last year',
+        'compare.calls': 'calls',
+        'compare.flat': 'no change',
+        'compare.unavailable': 'not enough history',
+        'export.title': 'Export',
+        'export.csv': 'CSV',
+        'export.json': 'JSON',
+        'panel.export': 'Export data',
         'trend.title': 'Daily token trend',
         'legend.note': 'Colors identify models only',
         'page.models': 'Model breakdown',
@@ -93,6 +123,10 @@ window.__ModuleLoader__.load({
         'panel.refresh': '刷新',
         'panel.close': '关闭',
         'panel.days14': '近 14 天',
+        'panel.selectDay': '点击曲线图查看某一天',
+        'panel.clear': '清除选择',
+        'panel.dayView': '单日视图',
+        'panel.allView': '近 14 天合计',
         'panel.full': '完整报表：设置 → 使用统计',
         'page.title': '使用统计',
         'page.badge': 'Token 用量',
@@ -103,14 +137,33 @@ window.__ModuleLoader__.load({
         'strip.bestStreak': '最长连续天数',
         'strip.days': '天',
         'heat.title': 'Token 活动',
-        'heat.daily': '每日',
-        'heat.weekly': '每周',
-        'heat.cumulative': '累计',
         'heat.less': '少',
         'heat.more': '多',
+        'heat.pick': '点击某一天查看当天的模型分布',
+        'dist.title': 'Token 分布',
+        'dist.today': '今日',
+        'dist.day': '分布',
+        'dist.none': '当天暂无用量',
+        'dist.clear': '返回今日',
         'range.title': '时间范围',
         'range.7': '近 7 日',
         'range.30': '近 30 日',
+        'range.90': '近 90 日',
+        'range.custom': '自定义',
+        'range.from': '开始',
+        'range.to': '结束',
+        'range.apply': '应用',
+        'range.invalid': '请输入窗口内的有效日期。',
+        'compare.title': '环比对比',
+        'compare.previous': '较上一周期',
+        'compare.lastYear': '较去年同期',
+        'compare.calls': '次调用',
+        'compare.flat': '持平',
+        'compare.unavailable': '历史数据不足',
+        'export.title': '导出',
+        'export.csv': 'CSV',
+        'export.json': 'JSON',
+        'panel.export': '导出数据',
         'trend.title': '每日 Token 趋势图',
         'legend.note': '颜色仅用于区分模型',
         'page.models': '模型明细',
@@ -305,6 +358,42 @@ window.__ModuleLoader__.load({
       return path
     }
 
+    /**
+     * SVG donut segments for a model share list. Each arc is one full circle
+     * drawn with a dash equal to its exact share; `stroke-dashoffset` shifts it
+     * to its start so consecutive arcs meet precisely — no gaps, closed ring.
+     * Both dasharray and dashoffset animate via CSS, so switching days morphs
+     * the ring smoothly while staying a closed loop.
+     */
+    function donutArcs(models, palette, size = 64, strokeWidth = 8) {
+      const total = models.reduce((sum, entry) => sum + Math.max(0, entry.total ?? 0), 0)
+      if (total <= 0) return { arcs: [], total: 0, radius: size / 2 - strokeWidth / 2 - 1 }
+      // Keep the outer stroke edge (radius + strokeWidth/2) inside the viewBox
+      // with a 1px margin, so the ring is never clipped by the SVG boundary.
+      const radius = size / 2 - strokeWidth / 2 - 1
+      const circumference = 2 * Math.PI * radius
+      let travelled = 0
+      const arcs = models.map(entry => {
+        const fraction = Math.max(0, entry.total ?? 0) / total
+        const length = fraction * circumference
+        const key = entry.key ?? `${entry.provider}\u0000${entry.model}`
+        // dashoffset advances the dash pattern: a NEGATIVE offset shifts the
+        // dash forward along the path so this arc starts at `travelled`,
+        // exactly where the previous arc ended. (A positive offset would push
+        // it backwards, breaking the ring.) Shares sum to 1, so the last arc
+        // closes against the first with no gap.
+        const arc = {
+          key,
+          color: palette.color(key),
+          dash: `${length.toFixed(3)} ${(circumference - length).toFixed(3)}`,
+          offset: (-travelled).toFixed(3),
+        }
+        travelled += length
+        return arc
+      }).filter(arc => Number(arc.dash.split(' ')[0]) > 0)
+      return { arcs, total, circumference, radius }
+    }
+
     /** Every day from the window start to today; a day nobody used reads zero. */
     function dayAxis(summary) {
       if (summary === undefined || typeof summary.today !== 'string' || typeof summary.windowStart !== 'string') return []
@@ -352,9 +441,15 @@ window.__ModuleLoader__.load({
         publish()
       }
 
-      async function fetchSummary(force) {
-        const query = force ? '?days=365&refresh=1' : '?days=365'
-        const response = await fetch(`${API}${query}`, {
+      async function fetchSummary(force, range, compareDays) {
+        const params = new URLSearchParams({ days: '365', compare: '1', compareDays: '7' })
+        if (compareDays !== undefined) params.set('compareDays', String(compareDays))
+        if (force) params.set('refresh', '1')
+        if (range !== undefined && range.from !== undefined && range.to !== undefined) {
+          params.set('from', range.from)
+          params.set('to', range.to)
+        }
+        const response = await fetch(`${API}?${params}`, {
           credentials: 'same-origin',
           headers: { accept: 'application/json' },
           redirect: 'error',
@@ -364,15 +459,17 @@ window.__ModuleLoader__.load({
       }
 
       /** Pump one refresh at a time; a request arriving mid-flight runs right after. */
-      function pump(force) {
+      function pump(force, range, compareDays) {
         if (running !== undefined) {
           queued = queued || force
+          pendingRange = range
+          pendingCompareDays = compareDays
           return
         }
         set({ status: state.summary === undefined ? 'loading' : 'refreshing' })
         running = (async () => {
           try {
-            set({ status: 'ready', summary: await fetchSummary(force), error: undefined })
+            set({ status: 'ready', summary: await fetchSummary(force, range, compareDays), error: undefined })
           } catch (error) {
             // Keep the last good summary: a stale figure with a stated reason
             // beats a blank page.
@@ -381,15 +478,30 @@ window.__ModuleLoader__.load({
             running = undefined
             if (queued) {
               queued = false
-              pump(true)
+              pump(true, pendingRange, pendingCompareDays)
+              pendingRange = undefined
+              pendingCompareDays = undefined
             }
           }
         })()
       }
 
+      let pendingRange = undefined
+      let pendingCompareDays = undefined
+
       function refresh(options = {}) {
-        pump(options.force === true)
+        pump(options.force === true, options.range, options.compareDays)
         return running ?? Promise.resolve()
+      }
+
+      /** Build an export URL for the current window; the browser downloads it. */
+      function exportUrl(format, range) {
+        const params = new URLSearchParams({ days: '365', format })
+        if (range !== undefined && range.from !== undefined && range.to !== undefined) {
+          params.set('from', range.from)
+          params.set('to', range.to)
+        }
+        return `${EXPORT_API}?${params}`
       }
 
       return {
@@ -411,6 +523,7 @@ window.__ModuleLoader__.load({
           }
         },
         refresh,
+        exportUrl,
       }
     }
 
@@ -526,17 +639,29 @@ window.__ModuleLoader__.load({
 .tud-block-head .tud-segmented { margin-left: auto; }
 .tud-block-title { color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 600; margin-bottom: 10px; }
 
+/* Activity block: heatmap above, distribution ring below. */
+.tud-activity-grid { display: flex; flex-direction: column; gap: 18px; }
+.tud-activity-side { border-top: 1px solid var(--dsw-alias-border-l1); padding-top: 14px; }
 /* GitHub-style activity heatmap: fixed cells, month ruler, less/more legend. */
 .tud-heat-block { display: flex; flex-direction: column; }
 .tud-heat-wrap { overflow-x: auto;
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
 .tud-heat { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 13px);
   grid-auto-columns: 13px; gap: 3px; width: max-content; padding: 2px 0; }
-.tud-heat-cell { width: 13px; height: 13px; border-radius: 3px; background: var(--dsw-alias-bg-layer-2); }
-.tud-heat-cell[data-level="1"] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 28%, var(--dsw-alias-bg-layer-2)); }
-.tud-heat-cell[data-level="2"] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 52%, var(--dsw-alias-bg-layer-2)); }
-.tud-heat-cell[data-level="3"] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 76%, var(--dsw-alias-bg-layer-2)); }
-.tud-heat-cell[data-level="4"] { background: var(--dsw-alias-brand-primary); }
+.tud-heat-cell { width: 13px; height: 13px; border-radius: 3px; padding: 0; border: none;
+  background: var(--dsw-alias-bg-layer-2); transition: transform 140ms ease, box-shadow 140ms ease; }
+/* Blue intensity ladder that follows the host theme: each level mixes more
+   blue into the SAME background token used by empty cells. Level 1 is closest
+   to the background, level 4 farthest — so "lighter → deeper" always reads in
+   the same direction whether the theme background is white or black. */
+.tud-heat-cell[data-level="1"] { background: color-mix(in srgb, #3b82d6 22%, var(--dsw-alias-bg-layer-2)); }
+.tud-heat-cell[data-level="2"] { background: color-mix(in srgb, #3b82d6 45%, var(--dsw-alias-bg-layer-2)); }
+.tud-heat-cell[data-level="3"] { background: color-mix(in srgb, #3b82d6 68%, var(--dsw-alias-bg-layer-2)); }
+.tud-heat-cell[data-level="4"] { background: color-mix(in srgb, #3b82d6 90%, var(--dsw-alias-bg-layer-2)); }
+.tud-heat-cell[data-selected] { outline: 2px solid var(--dsw-alias-label-primary); outline-offset: 1px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #3b82d6 45%, transparent); transform: scale(1.15); z-index: 1; }
+button.tud-heat-cell { cursor: pointer; }
+button.tud-heat-cell:hover:not([data-selected]) { transform: scale(1.15); }
 .tud-heat-months { display: grid; grid-auto-flow: column; grid-auto-columns: 13px; gap: 3px;
   width: max-content; margin-top: 6px; }
 .tud-heat-month { color: var(--dsw-alias-label-tertiary); font-size: 10px; line-height: 14px;
@@ -588,6 +713,104 @@ window.__ModuleLoader__.load({
 .tud-sharecell { white-space: nowrap; }
 .tud-scroll { overflow-x: auto;
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
+
+/* Period-over-period comparison strip. */
+.tud-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.tud-compare-card { border: 1px solid var(--dsw-alias-border-l1); border-radius: 10px; padding: 10px 12px;
+  background: var(--dsw-alias-bg-layer-1); display: flex; flex-direction: column; gap: 4px; }
+.tud-compare-label { color: var(--dsw-alias-label-secondary); font-size: 11px; }
+.tud-compare-value { color: var(--dsw-alias-label-primary); font-size: 15px; font-weight: 600;
+  font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 6px; }
+.tud-compare-delta { font-size: 12px; font-weight: 600; }
+.tud-compare-delta[data-dir="up"] { color: var(--dsw-alias-state-success-primary); }
+.tud-compare-delta[data-dir="down"] { color: var(--dsw-alias-state-error-primary); }
+.tud-compare-delta[data-dir="flat"] { color: var(--dsw-alias-label-tertiary); }
+.tud-compare-sub { color: var(--dsw-alias-label-tertiary); font-size: 10px; }
+
+/* Custom range inputs. */
+.tud-custom-range { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.tud-custom-range input { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary);
+  border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; padding: 4px 8px; font: inherit; font-size: 12px; }
+.tud-custom-range button { border: none; border-radius: 8px; padding: 5px 12px; background: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-bg-base); font: inherit; font-size: 12px; cursor: pointer; }
+.tud-custom-range button:disabled { opacity: 0.5; cursor: default; }
+.tud-range-error { color: var(--dsw-alias-state-error-primary); font-size: 11px; width: 100%; }
+
+/* Export button group. */
+.tud-export { display: inline-flex; gap: 4px; }
+.tud-export button { border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px;
+  padding: 4px 10px; background: transparent; color: var(--dsw-alias-label-secondary);
+  font: inherit; font-size: 12px; cursor: pointer; }
+.tud-export button:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+
+/* Settings-page distribution ring: closed donut + centre total + legend. */
+.tud-dist { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; padding: 4px 2px; }
+.tud-dist-ring { position: relative; flex: none; width: 120px; height: 120px; }
+.tud-dist-svg { overflow: visible; }
+.tud-dist-seg { transition: stroke-dasharray 520ms cubic-bezier(0.22, 1, 0.36, 1),
+  stroke-dashoffset 520ms cubic-bezier(0.22, 1, 0.36, 1), stroke 300ms ease; }
+.tud-dist-centre { position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 2px; pointer-events: none; }
+.tud-dist-value { color: var(--dsw-alias-label-primary); font-size: 20px; font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+.tud-dist-unit { color: var(--dsw-alias-label-tertiary); font-size: 10px; }
+.tud-dist-info { flex: 1 1 360px; min-width: 0; }
+.tud-dist-label { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px;
+  color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 600; }
+.tud-dist-date { color: var(--dsw-alias-label-tertiary); font-size: 11px; font-weight: 400; }
+.tud-dist-empty { color: var(--dsw-alias-label-secondary); font-size: 12px; padding: 8px 0; }
+/* Distribution legend: model name left, its token spend right-aligned. */
+.tud-dist-legend { display: flex; flex-direction: column; gap: 6px; min-width: 0; width: 100%; }
+.tud-dist-row { display: flex; align-items: center; gap: 8px; }
+.tud-dist-row .tud-tip-name { flex: 1 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-primary); }
+.tud-dist-tokens { flex: none; color: var(--dsw-alias-label-primary); font-size: 12px;
+  font-variant-numeric: tabular-nums; font-weight: 600; }
+.tud-dist-share { flex: none; min-width: 42px; text-align: right; color: var(--dsw-alias-label-tertiary);
+  font-size: 11px; font-variant-numeric: tabular-nums; }
+
+/* Popover donut: model share ring. */
+.tud-donut-wrap { display: flex; align-items: center; gap: 14px; }
+.tud-donut { flex: none; overflow: visible; }
+.tud-donut-seg { transition: stroke-dasharray 480ms cubic-bezier(0.22, 1, 0.36, 1),
+  stroke-dashoffset 480ms cubic-bezier(0.22, 1, 0.36, 1), stroke 300ms ease; }
+.tud-donut-legend { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tud-donut-row { display: flex; align-items: center; gap: 6px; color: var(--dsw-alias-label-secondary);
+  font-size: 11px; transition: opacity 260ms ease; }
+.tud-donut-row .tud-tip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tud-hero-value { transition: opacity 200ms ease; }
+/* Selected-day marker on the trend chart. */
+.tud-trend-selected { transition: x1 180ms ease, x2 180ms ease; }
+/* No browser square on the per-day hit targets; a soft keyboard-only cue. */
+.tud-trend-hit { outline: none; }
+.tud-trend-hit:focus-visible { stroke: var(--dsw-alias-brand-primary); stroke-width: 1.5;
+  stroke-dasharray: 2 3; rx: 4; }
+.tud-pick-hint { color: var(--dsw-alias-label-tertiary); font-size: 10px; margin-left: auto; }
+.tud-pick-clear { border: none; border-radius: 6px; padding: 2px 6px; margin-left: 6px;
+  background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary);
+  font: inherit; font-size: 10px; cursor: pointer; }
+.tud-pick-clear:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+
+/* Narrow screens / small windows: collapse the 5-cell strip and tighten blocks. */
+@media (max-width: 680px) {
+  .tud-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tud-strip-cell { padding: 12px 8px; }
+  .tud-strip-cell:nth-child(3) { border-left: none; border-top: 1px solid var(--dsw-alias-border-l1); }
+  .tud-strip-cell:nth-child(n+4) { border-top: 1px solid var(--dsw-alias-border-l1); }
+  .tud-panel { width: calc(100vw - 24px); max-height: 74vh; }
+  .tud-compare { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tud-page { gap: 12px; }
+}
+@media (max-width: 420px) {
+  .tud-strip { grid-template-columns: 1fr; }
+  .tud-strip-cell { border-left: none; border-top: 1px solid var(--dsw-alias-border-l1); }
+  .tud-strip-cell:first-child { border-top: none; }
+}
+/* Respect reduced-motion preferences (currently only subtle transitions here). */
+@media (prefers-reduced-motion: reduce) {
+  .tud-panel, .tud-tip, .tud-segmented button,
+  .tud-donut-seg, .tud-donut-row, .tud-hero-value, .tud-trend-selected { transition: none !important; }
+}
 `
 
     /* ------------------------------------------------------- pointer tooltip */
@@ -743,8 +966,22 @@ window.__ModuleLoader__.load({
       const summary = snapshot.summary
       const axis = dayAxis(summary).slice(-14)
       // Same window as the chart below it: the popover is one coherent 14-day view.
-      const models = aggregateModels(axis)
-      const palette = React.useMemo(() => pagePalette(models), [models])
+      const allModels = aggregateModels(axis)
+      const [selectedDay, setSelectedDay] = React.useState(null)
+      // A selected day narrows the breakdown to that day's own rows; anything
+      // else shows the full 14-day aggregate. Palette stays keyed by the full
+      // window so a model keeps its colour across the animation.
+      const selectedEntry = selectedDay === null ? undefined : axis.find(entry => entry.day === selectedDay)
+      const models = selectedDay !== null
+        ? aggregateModels([{ day: selectedDay, row: selectedEntry?.row }])
+        : allModels
+      const palette = React.useMemo(() => pagePalette(allModels), [allModels])
+      const dayTotal = selectedDay !== null
+        ? (selectedEntry?.row?.total ?? 0)
+        : (summary?.totals?.today ?? 0)
+      const dayCalls = selectedDay !== null
+        ? (selectedEntry?.row?.calls ?? 0)
+        : (summary?.totals?.todayCalls ?? 0)
       // Keep focus inside the popover and hand it back to the trigger on close.
       React.useEffect(() => {
         const panel = panelRef.current
@@ -780,6 +1017,13 @@ window.__ModuleLoader__.load({
               disabled: snapshot.status === 'refreshing',
               onClick: () => { void store.refresh({ force: true }) },
             }, h(RefreshIcon, null)),
+            h('a', {
+              className: 'tud-icon-button',
+              href: store.exportUrl('csv', undefined),
+              title: t('panel.export'),
+              'aria-label': t('panel.export'),
+              download: '',
+            }, h('span', { 'aria-hidden': true }, '↧')),
             h('button', {
               type: 'button', className: 'tud-icon-button', title: t('panel.close'),
               'aria-label': t('panel.close'), onClick: onClose,
@@ -791,15 +1035,64 @@ window.__ModuleLoader__.load({
               ? h(State, { text: t('foot.loading') })
               : h('div', null,
                 h('div', { className: 'tud-hero' },
-                  h('span', { className: 'tud-hero-value' }, formatTokens(summary.totals?.today)),
-                  h('span', { className: 'tud-hero-note' }, `${t('page.today')} · ${summary.totals?.todayCalls ?? 0} ${t('panel.calls')}`)),
+                  h('span', { className: 'tud-hero-value' }, formatTokens(dayTotal)),
+                  h('span', { className: 'tud-hero-note' },
+                    selectedDay === null
+                      ? `${t('page.today')} · ${dayCalls} ${t('panel.calls')}`
+                      : `${fullDay(selectedDay, locale)} · ${dayCalls} ${t('panel.calls')}`)),
+                (() => {
+                  const comparison = summary.comparison
+                  if (comparison === undefined || comparison.days !== 7) return null
+                  // Today vs the same weekday last week, approximated by the
+                  // current 7-day window total vs its prior period.
+                  const delta = deltaOf(comparison.total, t, locale)
+                  if (delta === null) return null
+                  return h('div', { className: 'tud-hero' },
+                    h('span', { className: `tud-compare-delta`, 'data-dir': delta.dir }, delta.text),
+                    h('span', { className: 'tud-hero-note' }, `${t('compare.previous')} · ${comparison.days}${t('strip.days')}`))
+                })(),
                 snapshot.status === 'error'
                   ? h(State, { text: t('page.stale'), onRetry: () => { void store.refresh({ force: true }) }, t })
                   : null,
+                models.length > 0 ? (() => {
+                  const ring = donutArcs(models, palette, 60)
+                  // Show the top routes of the *current* view (day or window);
+                  // colours come from the stable full-window palette.
+                  const top = models.slice(0, 5)
+                  return h('div', { className: 'tud-donut-wrap' },
+                    h('svg', {
+                      className: 'tud-donut', width: 60, height: 60, viewBox: '0 0 60 60',
+                      role: 'img', 'aria-label': `${selectedDay === null ? t('panel.allView') : t('panel.dayView')} · ${t('page.models')}`,
+                    }, h('g', { transform: 'rotate(-90 30 30)' },
+                      ...ring.arcs.map(arc => h('circle', {
+                        key: arc.key,
+                        className: 'tud-donut-seg',
+                        cx: 30, cy: 30, r: ring.radius,
+                        stroke: arc.color, strokeWidth: 8, fill: 'none',
+                        'stroke-dasharray': arc.dash,
+                        'stroke-dashoffset': arc.offset,
+                      })))),
+                    h('div', { className: 'tud-donut-legend' },
+                      ...top.map(entry => {
+                        const key = entry.key ?? `${entry.provider}\u0000${entry.model}`
+                        return h('div', { className: 'tud-donut-row', key },
+                          h('span', { className: 'tud-tip-dot', style: { background: palette.color(key) } }),
+                          h('span', { className: 'tud-tip-name' }, entry.model),
+                          h('span', null, formatShare(entry.share ?? 0)))
+                      })))
+                })() : null,
                 axis.length === 0 ? null : h('div', null,
-                  h('div', { className: 'tud-caption' }, `${t('trend.title')} · ${t('panel.days14')}`),
-                  h(TrendChart, { axis, locale, t, compact: true })),
-                h('div', { className: 'tud-caption' }, t('page.models')),
+                  h('div', { className: 'tud-caption' },
+                    `${t('trend.title')} · ${t('panel.days14')}`,
+                    selectedDay === null
+                      ? h('span', { className: 'tud-pick-hint' }, t('panel.selectDay'))
+                      : h('button', { type: 'button', className: 'tud-pick-clear', onClick: () => setSelectedDay(null) }, t('panel.clear'))),
+                  h(TrendChart, {
+                    axis, locale, t, compact: true,
+                    selectable: true, selectedDay, onSelectDay: setSelectedDay,
+                  })),
+                h('div', { className: 'tud-caption' },
+                  selectedDay === null ? t('page.models') : `${t('panel.dayView')} · ${fullDay(selectedDay, locale)}`),
                 models.length === 0
                   ? h(State, { text: t('page.empty') })
                   : h(ModelRows, { models, palette, t }),
@@ -858,8 +1151,7 @@ window.__ModuleLoader__.load({
 
     /* --------------------------------------------------------- settings page */
 
-    const RANGES = [7, 30]
-    const HEAT_MODES = ['daily', 'weekly', 'cumulative']
+    const RANGES = [7, 30, 90]
     /**
      * Categorical series colours for the trend lines and legend — one clearly
      * distinct hue per model, in the reference dashboard's multi-hue style.
@@ -931,79 +1223,134 @@ window.__ModuleLoader__.load({
           h('span', { className: 'tud-strip-label' }, cell.label))))
     }
 
+    /** Arrow + delta label for one comparison metric. */
+    function deltaOf(metric, t, locale, unit) {
+      if (metric === undefined || metric === null) return null
+      const { value, prior, change, unavailable } = metric
+      if (unavailable) return { text: t('compare.unavailable'), dir: 'flat' }
+      if (change === null) return { text: prior === 0 && value > 0 ? '+' + formatTokens(value) : t('compare.flat'), dir: prior === 0 && value > 0 ? 'up' : 'flat' }
+      const pct = change * 100
+      const dir = pct > 0.05 ? 'up' : pct < -0.05 ? 'down' : 'flat'
+      const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '─'
+      const abs = Math.abs(pct)
+      const shown = abs >= 100 ? Math.round(abs) : abs.toFixed(1)
+      return { text: `${arrow} ${shown}%`, dir, prior: `${formatTokens(prior)}${unit ?? ''}` }
+    }
+
+    /** Period-over-period and year-over-year comparison cards. */
+    function ComparisonStrip({ comparison, t, locale }) {
+      if (comparison === undefined) return null
+      const prev = deltaOf(comparison.total, t, locale)
+      const yoy = deltaOf(comparison.yearOverYear, t, locale)
+      if (prev === null && yoy === null) return null
+      const cards = []
+      if (prev !== null) cards.push({
+        key: 'prev',
+        label: `${t('compare.previous')} · ${comparison.days}${t('strip.days')}`,
+        delta: prev,
+        metric: comparison.total,
+      })
+      if (yoy !== null) cards.push({
+        key: 'yoy',
+        label: t('compare.lastYear'),
+        delta: yoy,
+        metric: comparison.yearOverYear,
+      })
+      return h('div', { className: 'tud-compare', role: 'group', 'aria-label': t('compare.title') },
+        ...cards.map(card => h('div', { className: 'tud-compare-card', key: card.key },
+          h('span', { className: 'tud-compare-label' }, card.label),
+          h('span', { className: 'tud-compare-value' },
+            h('span', { className: 'tud-compare-delta', 'data-dir': card.delta.dir }, card.delta.text)),
+          card.delta.prior !== undefined
+            ? h('span', { className: 'tud-compare-sub' }, `${formatTokens(card.metric.prior)} → ${formatTokens(card.metric.value)}`)
+            : null)))
+    }
+
     /**
-     * GitHub-style activity heatmap over the full retained year.
-     * Columns are weeks (Monday first), rows are weekdays. `mode` selects the
-     * measured value: the day's tokens, its week's tokens, or the running
-     * cumulative total. Cell level is sqrt-scaled so heavy days stay readable.
+     * Closed donut showing one day's (or today's) per-model token distribution,
+     * with the day's total in the centre and a compact legend beside it. Arcs
+     * animate between days via CSS dasharray/dashoffset transitions.
      */
-    function ActivityHeatmap({ axis, mode, locale, t }) {
+    function DistributionRing({ axis, day, locale, t }) {
+      const entry = day === null || day === undefined
+        ? undefined
+        : axis.find(item => item.day === day)
+      const viewDay = entry?.day ?? axis[axis.length - 1]?.day
+      const models = aggregateModels(viewDay === undefined ? [] : [{ day: viewDay, row: entry?.row }])
+      const palette = React.useMemo(() => pagePalette(models), [models])
+      const total = models.reduce((sum, m) => sum + m.total, 0)
+      const strokeWidth = 14
+      const ring = donutArcs(models, palette, 120, strokeWidth)
+      const centre = 60
+      return h('div', { className: 'tud-dist' },
+        h('div', { className: 'tud-dist-ring' },
+          h('svg', {
+            width: 120, height: 120, viewBox: '0 0 120 120',
+            className: 'tud-dist-svg',
+            role: 'img', 'aria-label': `${t('dist.title')} · ${viewDay ?? ''}`,
+          }, h('g', { transform: `rotate(-90 ${centre} ${centre})` },
+            ...ring.arcs.map(arc => h('circle', {
+              key: arc.key,
+              className: 'tud-donut-seg tud-dist-seg',
+              cx: centre, cy: centre, r: ring.radius,
+              stroke: arc.color, strokeWidth, fill: 'none',
+              'stroke-dasharray': arc.dash,
+              'stroke-dashoffset': arc.offset,
+            })))),
+          h('div', { className: 'tud-dist-centre' },
+            h('span', { className: 'tud-dist-value' }, formatTokens(total)),
+            h('span', { className: 'tud-dist-unit' }, t('page.tokens')))),
+        h('div', { className: 'tud-dist-info' },
+          h('div', { className: 'tud-dist-label' },
+            day === null || day === undefined ? t('dist.today') : t('dist.day'),
+            h('span', { className: 'tud-dist-date' }, viewDay ?? '')),
+          models.length === 0
+            ? h('div', { className: 'tud-dist-empty' }, t('dist.none'))
+            : h('div', { className: 'tud-dist-legend' },
+              ...models.map(m => {
+                const key = m.key ?? `${m.provider}\u0000${m.model}`
+                return h('div', { className: 'tud-dist-row', key },
+                  h('span', { className: 'tud-tip-dot', style: { background: palette.color(key) } }),
+                  h('span', { className: 'tud-tip-name' }, m.model),
+                  h('span', { className: 'tud-dist-tokens' }, formatTokens(m.total)),
+                  h('span', { className: 'tud-dist-share' }, formatShare(m.share ?? 0)))
+              }))))
+    }
+
+    /**
+     * GitHub-style activity heatmap over the full retained year. Each cell is
+     * that single day's tokens (sqrt-scaled intensity). Cells are selectable:
+     * clicking one reports the day through `onSelectDay` so the distribution
+     * ring can show that day's model breakdown.
+     */
+    function ActivityHeatmap({ axis, locale, t, selectedDay, onSelectDay }) {
       // Hooks first: an early return must not change hook order between renders.
       const tipState = useTip()
       const wrapRef = React.useRef(null)
       React.useEffect(() => {
         const wrap = wrapRef.current
         if (wrap !== null && wrap !== undefined) wrap.scrollLeft = wrap.scrollWidth
-      }, [mode])
+      }, [])
 
       const dayValue = entry => entry.row?.total ?? 0
       const hasUsage = axis.some(entry => dayValue(entry) > 0)
       if (axis.length === 0 || !hasUsage) return h(State, { text: t('page.empty') })
 
-      // Weekly: every cell of a week column carries that week's total.
-      const firstDow = (new Date(`${axis[0].day}T00:00:00Z`).getUTCDay() + 6) % 7
-      const weekTotals = []
-      let weekSum = 0
-      axis.forEach((entry, position) => {
-        const slot = firstDow + position
-        if (slot % 7 === 0 && position > 0) {
-          weekTotals.push(weekSum)
-          weekSum = 0
-        }
-        weekSum += dayValue(entry)
-      })
-      weekTotals.push(weekSum)
-
-      // Cumulative: the running total through each day.
-      let running = 0
-      const values = axis.map((entry, position) => {
-        const value = dayValue(entry)
-        if (mode === 'weekly') return weekTotals[Math.floor((firstDow + position) / 7)] ?? 0
-        running += value
-        return mode === 'cumulative' ? running : value
-      })
+      const values = axis.map(entry => dayValue(entry))
       const max = Math.max(1, ...values)
       const levelOf = value => (value <= 0 ? 0 : Math.min(4, Math.max(1, Math.ceil(Math.sqrt(value / max) * 4))))
 
-      /**
-       * Hover card: the date it is, the tokens it measured, and the measure's
-       * own scope (a plain day, its week, or the running total).
-       */
       const tipFor = position => {
-        const dayText = fullDay(axis[position].day, locale)
-        const valueText = `${formatExact(values[position], locale)} ${t('page.tokens')}`
-        const dailyText = `${formatExact(dayValue(axis[position]), locale)} ${t('page.tokens')}`
-        if (mode === 'weekly') {
-          const weekStart = Math.max(0, Math.floor((firstDow + position) / 7) * 7 - firstDow)
-          const weekEnd = Math.min(axis.length - 1, weekStart + 6)
-          return h('div', null,
-            h('div', { className: 'tud-tip-day' }, `${dayText} · ${t('heat.weekly')}`),
-            h('div', null, `${shortDay(axis[weekStart].day)}–${shortDay(axis[weekEnd].day)} · ${valueText}`),
-            h('div', { className: 'tud-tip-note' }, `${t('heat.daily')}: ${dailyText}`))
-        }
-        if (mode === 'cumulative') {
-          return h('div', null,
-            h('div', { className: 'tud-tip-day' }, dayText),
-            h('div', null, `${t('heat.cumulative')}: ${valueText}`),
-            h('div', { className: 'tud-tip-note' }, `${t('heat.daily')}: ${dailyText}`))
-        }
+        const entry = axis[position]
         return h('div', null,
-          h('div', { className: 'tud-tip-day' }, dayText),
-          h('div', null, valueText))
+          h('div', { className: 'tud-tip-day' }, fullDay(entry.day, locale)),
+          h('div', null, `${formatExact(values[position], locale)} ${t('page.tokens')}`),
+          h('div', { className: 'tud-tip-note' }, t('heat.pick')))
       }
 
       // Column-major cells: placeholder padding before the first day and after
       // today keeps every real day on its weekday row.
+      const firstDow = (new Date(`${axis[0].day}T00:00:00Z`).getUTCDay() + 6) % 7
       const totalSlots = firstDow + axis.length
       const columns = Math.ceil(totalSlots / 7)
       const cells = []
@@ -1014,8 +1361,10 @@ window.__ModuleLoader__.load({
           ? { empty: true, key: `pad-${slot}` }
           : {
             key: entry.day,
+            day: entry.day,
             level: levelOf(values[position]),
             position,
+            selected: entry.day === selectedDay,
             label: `${fullDay(entry.day, locale)} · ${formatExact(values[position], locale)}`,
           })
       }
@@ -1044,12 +1393,16 @@ window.__ModuleLoader__.load({
           h('div', { className: 'tud-heat', role: 'group', 'aria-label': t('heat.title') },
             ...cells.map(cell => cell.empty
               ? h('span', { key: cell.key, className: 'tud-heat-cell', 'aria-hidden': true })
-              : h('span', {
+              : h('button', {
                 key: cell.key,
+                type: 'button',
                 className: 'tud-heat-cell',
                 'data-level': cell.level,
+                'data-selected': cell.selected || undefined,
                 role: 'img',
                 'aria-label': cell.label,
+                'aria-pressed': cell.selected,
+                onClick: () => { onSelectDay(cell.day === selectedDay ? null : cell.day) },
                 onMouseEnter: event => tipState.show(tipFor(cell.position), event),
                 onMouseMove: event => tipState.show(tipFor(cell.position), event),
                 onMouseLeave: tipState.hide,
@@ -1068,11 +1421,15 @@ window.__ModuleLoader__.load({
     }
 
     /** The daily trend chart: one smooth line per top model, plus "Other". */
-    function TrendChart({ axis, locale, t, compact }) {
+    function TrendChart({ axis, locale, t, compact, selectedDay, onSelectDay, selectable, showLegend = false }) {
       // Hooks first: an early return must not change hook order between renders.
-      const tipState = useTip()
+      // No tooltip here: the distribution ring already shows a day's date and
+      // model split, so a hover card would repeat the same information.
       const [hoverIndex, setHoverIndex] = React.useState(null)
       const svgRef = React.useRef(null)
+      const selectIndex = selectedDay === undefined || selectedDay === null
+        ? null
+        : axis.findIndex(entry => entry.day === selectedDay)
 
       const series = seriesOf(axis)
       if (series.length === 0) return h(State, { text: t('page.empty') })
@@ -1114,38 +1471,32 @@ window.__ModuleLoader__.load({
         return Math.max(0, Math.min(n - 1, Math.round((viewX - padL) / (step || 1))))
       }
 
-      /** Hover card: the date, then every model's value that day with its line colour. */
-      const tipFor = index => {
-        const entry = axis[index]
-        const rows = lines
-          .map(line => ({ label: line.label, color: line.color, value: line.values[index] ?? 0 }))
-          .sort((a, b) => b.value - a.value)
-        return h('div', null,
-          h('div', { className: 'tud-tip-day' },
-            `${fullDay(entry.day, locale)} · ${formatExact(entry.row?.total ?? 0, locale)} ${t('page.tokens')}`),
-          ...rows.map(row => h('div', { className: 'tud-tip-row', key: row.label },
-            h('span', { className: 'tud-tip-dot', style: { background: row.color } }),
-            h('span', { className: 'tud-tip-name' }, row.label),
-            h('span', { className: 'tud-tip-value' }, formatExact(row.value, locale)))))
-      }
-
+      // Hover only moves the visual guide (line + dots); it deliberately does
+      // not open an information card — that would duplicate the distribution
+      // ring's date and per-model breakdown.
       const onMove = event => {
         const index = indexAt(event.clientX)
         if (index === null) return
         setHoverIndex(index)
-        tipState.show(tipFor(index), event)
       }
       const onLeave = () => {
         setHoverIndex(null)
-        tipState.hide()
       }
+      /** Click (or Enter/Space on a day target) toggles that day's selection. */
+      const onPick = index => {
+        if (selectable !== true || onSelectDay === undefined || index === null || index < 0) return
+        const day = axis[index]?.day
+        if (day === undefined) return
+        onSelectDay(day === selectedDay ? null : day)
+      }
+      const onChartClick = event => { onPick(indexAt(event.clientX)) }
 
       return h('div', null,
-        h('div', { className: 'tud-legend' },
+        showLegend ? h('div', { className: 'tud-legend' },
           ...lines.map(line => h('span', { className: 'tud-legend-chip', key: line.label },
             h('span', { className: 'tud-legend-dot', style: { background: line.color } }),
             line.label)),
-          h('span', { className: 'tud-legend-note' }, t('legend.note'))),
+          h('span', { className: 'tud-legend-note' }, t('legend.note'))) : null,
         h('svg', {
           className: 'tud-trend',
           viewBox: `0 0 ${W} ${H}`,
@@ -1154,6 +1505,8 @@ window.__ModuleLoader__.load({
           ref: svgRef,
           onMouseMove: onMove,
           onMouseLeave: onLeave,
+          onClick: selectable === true ? onChartClick : undefined,
+          style: selectable === true ? { cursor: 'pointer' } : undefined,
         },
           ...[0, 0.25, 0.5, 0.75, 1].map(level => h('line', {
             key: level,
@@ -1173,9 +1526,28 @@ window.__ModuleLoader__.load({
             strokeLinecap: 'round',
             strokeLinejoin: 'round',
           })),
-          // Hover guide: a vertical rule at the tracked day plus a marker on
-          // each line, so "which model is this" reads straight off the graph.
-          hoverIndex === null ? null : h('line', {
+          // Selected-day guide: a solid accent rule that stays until cleared.
+          selectIndex !== null && selectIndex >= 0 ? h('line', {
+            key: 'selected',
+            className: 'tud-trend-selected',
+            x1: padL + selectIndex * step, x2: padL + selectIndex * step,
+            y1: padT, y2: padT + plotH,
+            stroke: 'var(--dsw-alias-brand-primary)',
+            strokeWidth: 2,
+          }) : null,
+          selectIndex !== null && selectIndex >= 0 ? lines.map(line => h('circle', {
+            key: `sel-${line.label}`,
+            cx: padL + selectIndex * step,
+            cy: padT + plotH - (Math.min(line.values[selectIndex] ?? 0, max) / max) * plotH,
+            r: 5,
+            fill: line.color,
+            stroke: 'var(--dsw-alias-bg-base)',
+            strokeWidth: 1.5,
+          })) : null,
+          // Hover guide: skip it entirely when the hovered day is the selected
+          // day — the selected guide + markers above already mark that spot,
+          // so drawing both would show two lines and two sets of dots.
+          hoverIndex === null || hoverIndex === selectIndex ? null : h('line', {
             key: 'guide',
             x1: padL + hoverIndex * step, x2: padL + hoverIndex * step,
             y1: padT, y2: padT + plotH,
@@ -1183,7 +1555,7 @@ window.__ModuleLoader__.load({
             strokeDasharray: '3 4',
             strokeWidth: 1,
           }),
-          hoverIndex === null ? null : lines.map(line => h('circle', {
+          hoverIndex === null || hoverIndex === selectIndex ? null : lines.map(line => h('circle', {
             key: `dot-${line.label}`,
             cx: padL + hoverIndex * step,
             cy: padT + plotH - (Math.min(line.values[hoverIndex] ?? 0, max) / max) * plotH,
@@ -1192,9 +1564,12 @@ window.__ModuleLoader__.load({
             stroke: 'var(--dsw-alias-bg-base)',
             strokeWidth: 1.5,
           })),
-          ...axis.map((entry, position) => {
-            // One focusable hit target per day keeps the per-day figures
-            // reachable without a mouse; the <title> serves hover.
+          // Hit targets exist only for selectable charts (the popover). The
+          // settings-page trend chart is display-only: rendering focusable
+          // rects there would draw a browser focus square on click while doing
+          // nothing. Hover guides work off the svg's mousemove + coordinates,
+          // so no rects are needed for a static chart.
+          ...(selectable === true ? axis.map((entry, position) => {
             const detail = `${fullDay(entry.day, locale)} · ${formatExact(entry.row?.total ?? 0, locale)}${
               (entry.row?.models ?? [])
                 .slice(0, 4)
@@ -1202,16 +1577,25 @@ window.__ModuleLoader__.load({
                 .join('')}`
             return h('rect', {
               key: `hit-${entry.day}`,
+              className: 'tud-trend-hit',
               x: padL + position * step - step / 2,
               y: padT,
               width: Math.max(step, 2),
               height: plotH,
               fill: 'transparent',
               tabIndex: 0,
-              role: 'img',
+              role: 'button',
               'aria-label': detail,
-            }, h('title', null, detail))
-          }),
+              'aria-pressed': entry.day === selectedDay,
+              onClick: () => onPick(position),
+              onKeyDown: event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  onPick(position)
+                }
+              },
+            })
+          }) : []),
           ...axis.map((entry, position) => position % labelEvery === 0 || position === n - 1
             ? h('text', {
               key: `x-${entry.day}`,
@@ -1221,8 +1605,7 @@ window.__ModuleLoader__.load({
               fontSize: 11,
               textAnchor: position === n - 1 ? 'end' : (position === 0 ? 'start' : 'middle'),
             }, axisDay(entry.day, locale))
-            : null)),
-        h(TipLayer, { tip: tipState.tip }))
+            : null)))
     }
 
     function ModelTable({ models, palette, t, locale }) {
@@ -1263,11 +1646,18 @@ window.__ModuleLoader__.load({
       const locale = useLocaleTag(ctx)
       const summary = snapshot.summary
       const [range, setRange] = React.useState(7)
-      const [heatMode, setHeatMode] = React.useState('daily')
+      const [activityDay, setActivityDay] = React.useState(null)
+      const [customOpen, setCustomOpen] = React.useState(false)
+      const [from, setFrom] = React.useState('')
+      const [to, setTo] = React.useState('')
+      const [rangeError, setRangeError] = React.useState(false)
 
       const head = h('div', { className: 'tud-page-head' },
         h('div', { className: 'tud-page-title' }, t('page.title')),
-        h('span', { className: 'tud-badge' }, t('page.badge')))
+        h('span', { className: 'tud-badge' }, t('page.badge')),
+        h('div', { className: 'tud-export', role: 'group', 'aria-label': t('export.title') },
+          h('button', { type: 'button', onClick: () => { window.location.href = store.exportUrl('csv', undefined) } }, t('export.csv')),
+          h('button', { type: 'button', onClick: () => { window.location.href = store.exportUrl('json', undefined) } }, t('export.json'))))
 
       if (snapshot.status === 'error' && summary === undefined) {
         return h('div', { className: 'tud-page' },
@@ -1284,38 +1674,65 @@ window.__ModuleLoader__.load({
       const palette = pagePalette(models)
       const hasRangeUsage = rangeAxis.some(entry => (entry.row?.total ?? 0) > 0)
 
-      const heatSegment = h('div', { className: 'tud-segmented', role: 'group', 'aria-label': t('heat.title') },
-        ...HEAT_MODES.map(mode => h('button', {
-          key: mode,
-          type: 'button',
-          'data-active': heatMode === mode || undefined,
-          'aria-pressed': heatMode === mode,
-          onClick: () => { setHeatMode(mode) },
-        }, t(`heat.${mode}`))))
       const heatBlock = h('div', { className: 'tud-block' },
         h('div', { className: 'tud-block-head' },
           h('div', { className: 'tud-block-title' }, t('heat.title')),
-          heatSegment),
-        h(ActivityHeatmap, { axis, mode: heatMode, locale, t }))
+          activityDay !== null
+            ? h('button', { type: 'button', className: 'tud-pick-clear', onClick: () => setActivityDay(null) }, t('dist.clear'))
+            : null),
+        h('div', { className: 'tud-activity-grid' },
+          h(ActivityHeatmap, { axis, locale, t, selectedDay: activityDay, onSelectDay: setActivityDay }),
+          h('div', { className: 'tud-activity-side' },
+            h('div', { className: 'tud-block-title' }, t('dist.title')),
+            h(DistributionRing, { axis, day: activityDay, locale, t }))))
 
+      const applyCustom = () => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+          setRangeError(true)
+          return
+        }
+        setRangeError(false)
+        void store.refresh({ force: true, range: { from, to } })
+      }
       const rangeSegment = h('div', { className: 'tud-segmented', role: 'group', 'aria-label': t('range.title') },
         ...RANGES.map(days => h('button', {
           key: days,
           type: 'button',
-          'data-active': range === days || undefined,
-          'aria-pressed': range === days,
-          onClick: () => { setRange(days) },
-        }, t(`range.${days}`))))
-      const rangeRow = h('div', { className: 'tud-range-row' },
-        h('span', { className: 'tud-range-label' }, t('range.title')),
-        rangeSegment)
+          'data-active': !customOpen && range === days || undefined,
+          'aria-pressed': !customOpen && range === days,
+          onClick: () => { setCustomOpen(false); setRange(days); void store.refresh({ force: true, compareDays: days }) },
+        }, t(`range.${days}`))),
+        h('button', {
+          key: 'custom',
+          type: 'button',
+          'data-active': customOpen || undefined,
+          'aria-pressed': customOpen,
+          onClick: () => { setCustomOpen(current => !current) },
+        }, t('range.custom')))
+      const rangeRow = h('div', null,
+        h('div', { className: 'tud-range-row' },
+          h('span', { className: 'tud-range-label' }, t('range.title')),
+          rangeSegment),
+        customOpen ? h('div', { className: 'tud-custom-range' },
+          h('label', null, t('range.from'), h('input', {
+            type: 'date', value: from, max: summary.today,
+            onChange: e => { setFrom(e.target.value); setRangeError(false) },
+          })),
+          h('label', null, t('range.to'), h('input', {
+            type: 'date', value: to, max: summary.today,
+            onChange: e => { setTo(e.target.value); setRangeError(false) },
+          })),
+          h('button', { type: 'button', onClick: applyCustom }, t('range.apply')),
+          rangeError ? h('span', { className: 'tud-range-error', role: 'alert' }, t('range.invalid')) : null) : null)
 
       const trendBlock = h('div', { className: 'tud-block' },
         h('div', { className: 'tud-block-title' }, t('trend.title')),
         hasRangeUsage ? h(TrendChart, { axis: rangeAxis, locale, t }) : h(State, { text: t('page.empty') }))
 
+      const comparisonBlock = h(ComparisonStrip, { comparison: summary.comparison, t, locale })
+
       const tableBlock = h('div', { className: 'tud-block' },
-        h('div', { className: 'tud-block-title' }, `${t('page.models')} · ${t(`range.${range}`)}`),
+        h('div', { className: 'tud-block-title' }, `${t('page.models')} · ${customOpen ? t('range.custom') : t(`range.${range}`)}`),
         models.length === 0
           ? h(State, { text: t('page.empty') })
           : h(ModelTable, { models, palette, t, locale }))
@@ -1326,6 +1743,7 @@ window.__ModuleLoader__.load({
           ? h(State, { text: t('page.stale'), onRetry: () => { void store.refresh({ force: true }) }, t })
           : null,
         h(SummaryStrip, { axis, totals: summary.totals, locale, t }),
+        comparisonBlock,
         heatBlock,
         rangeRow,
         trendBlock,
