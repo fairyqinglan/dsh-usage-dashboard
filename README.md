@@ -10,7 +10,11 @@ Zero runtime dependencies. Two plain JavaScript files. No build step.
 
 ## Screenshots
 
-*(see the in-app pages described below — the plugin renders inside DeepSeek Harness)*
+![Usage statistics settings page: summary strip, period comparison, blue activity heatmap and the token distribution ring](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/main/docs/screenshots/01-overview.png)
+![Token activity heatmap with the per-model distribution ring and each model's token spend](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/main/docs/screenshots/02-distribution.png)
+![Sidebar-footer popover with the model-share donut and the 14-day trend chart](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/main/docs/screenshots/03-popover.png)
+
+*Click a day on the heatmap or the trend chart to update the distribution ring; the blue ladder follows the light/dark theme.*
 
 ## Where to find it
 
@@ -64,9 +68,10 @@ Exports are streamed as attachments named `token-usage-YYYY-MM-DD.{csv,json}`.
 Requires DeepSeek Harness with the Cordis plugin system (0.2.x).
 
 ```bash
-# from your profile directory (the one containing package.json with the dsh.profile block)
-pnpm add <this-repo-url>
+dsh plugin --profile <profile> add github:fairyqinglan/dsh-usage-dashboard
 ```
+
+Replace `<profile>` with your host's profile name (`web` for `dsh web`, `desktop` for the Desktop app). Or install with one click from the plugin market — search for `dsh-usage-dashboard`.
 
 Then add the bundle to the profile's `dsh.profile.bundles`:
 
@@ -147,6 +152,14 @@ test/              dependency-free checks (see Development)
 
 零运行时依赖,两个纯 JavaScript 文件,无构建步骤。
 
+## 效果截图
+
+![使用统计设置页:汇总条、周期对比、蓝色活动热力图与 Token 分布环](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/main/docs/screenshots/01-overview.png)
+![Token 活动热力图与按模型分布环,右侧列出每个模型的 token 消耗](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/main/docs/screenshots/02-distribution.png)
+![侧边栏弹窗:模型占比环与近 14 天趋势图](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/main/docs/screenshots/03-popover.png)
+
+*点击热力图或趋势图上的某一天,分布环即更新为那天的模型占比;蓝色深浅跟随明暗主题自动调整。*
+
 ## 入口
 
 1. **侧边栏左下角** —— 设置齿轮上方的柱状图按钮,显示今天总量,点开弹出模型占比环图 + 近 14 天平滑趋势图 + 各模型占比列表 + 一键 CSV 导出。**点击趋势图上的任意一天**(或用键盘聚焦后按 Enter/空格),上方的环形图、图例和模型列表就会平滑过渡到那一天的明细;再次点击或点"清除选择"即可回到近 14 天合计。
@@ -217,9 +230,10 @@ CI 在每次 push 和 pull request 时运行全部四项。
 需要带 Cordis 插件体系的 DeepSeek Harness(0.2.x)。
 
 ```bash
-# 在 profile 目录下(即含 dsh.profile 配置的 package.json 所在目录)
-pnpm add <本仓库地址>
+dsh plugin --profile <profile> add github:fairyqinglan/dsh-usage-dashboard
 ```
+
+把 `<profile>` 换成你的宿主 profile 名(`dsh web` 用 `web`,桌面版用 `desktop`)。也可以在插件市场里搜索 `dsh-usage-dashboard` 一键安装。
 
 然后把 bundle 加进 profile 的 `dsh.profile.bundles`:
 

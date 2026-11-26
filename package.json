@@ -24,6 +24,7 @@
     "icon.svg",
     "README.md",
     "LICENSE",
+    "docs",
     "test/*.mjs",
     "test/*.cjs"
   ],
