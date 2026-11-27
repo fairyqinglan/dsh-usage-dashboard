@@ -75,6 +75,14 @@ const summary = {
   },
   models: [],
   days: dayList,
+  // A ready wallet: the popover must render both the main balance and bonus.
+  balance: {
+    status: 'ready',
+    wallets: [{ currency: 'CNY', balance: '128.45' }],
+    bonusWallets: [{ currency: 'CNY', balance: '5.00' }, { currency: 'CNY', balance: '2.50' }],
+    currency: 'CNY',
+    readAt: Date.now(),
+  },
 }
 
 global.window = {

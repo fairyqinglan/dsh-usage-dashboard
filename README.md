@@ -18,7 +18,7 @@ Zero runtime dependencies. Two plain JavaScript files. No build step.
 
 ## Where to find it
 
-1. **Sidebar footer** — a bar-chart button above the settings gear shows today's total and opens a popover: a model-share donut, a 14-day smooth trend chart, a per-model share list, and a one-click CSV export. **Click any day on the trend chart** (or focus it and press Enter/Space) to narrow the donut, legend and model list to that day's usage with a smooth animated transition; click again or use "Clear selection" to return to the 14-day aggregate.
+1. **Sidebar footer** — a bar-chart button above the settings gear shows today's total and opens a popover: a model-share donut, a 14-day smooth trend chart, a per-model share list, your DeepSeek wallet balance, and a one-click CSV export. **Click any day on the trend chart** (or focus it and press Enter/Space) to narrow the donut, legend and model list to that day's usage with a smooth animated transition; click again or use "Clear selection" to return to the 14-day aggregate.
 2. **Settings → Usage statistics** — the full dashboard:
 
    | Section | What it shows |
@@ -42,7 +42,8 @@ Zero runtime dependencies. Two plain JavaScript files. No build step.
 
 ## Privacy and security
 
-- **Local only.** Reads your own session logs from local disk. Makes no network requests. Sends nothing anywhere.
+- **Local only for usage data.** Reading token usage touches only your own session logs on local disk; nothing is sent anywhere.
+- **Wallet balance is the one networked read.** When the DSH DeepSeek account plugin is present and you are signed in, the popover also shows your wallet balance. That value is fetched by the **account plugin's own service** (`deepseekAccount.getBalance`) over the authenticated Platform connection DSH already uses — this plugin never holds a token, never calls Platform directly, and derives no network client of its own. Without that seam, or when signed out, the row simply says the balance is unavailable. The result is memoised for 60 seconds.
 - **Authenticated surface.** The two API routes (`GET /api/token-usage-dashboard/summary` and `GET /api/token-usage-dashboard/export`) sit behind the Harness web server's connection trust fence — unauthenticated requests are rejected by the host before the handler runs.
 - **No secrets.** The code holds no credentials, no `process.env` reads, no telemetry, no remote code.
 - **No conversation content.** Aggregation touches only event types, `usage` numbers, route ids, and timestamps. Prompt and response text is never read, folded, or exposed.
@@ -62,6 +63,15 @@ Both routes require the Harness connection trust fence and accept:
 | `format=csv\|json` | export | Export format (default CSV) |
 
 Exports are streamed as attachments named `token-usage-YYYY-MM-DD.{csv,json}`.
+
+The summary response also carries an optional `balance` object:
+
+```jsonc
+{ "status": "ready", "wallets": [{ "currency": "CNY", "balance": "128.45" }],
+  "bonusWallets": [{ "currency": "CNY", "balance": "5.00" }], "currency": "CNY", "readAt": 0 }
+{ "status": "unavailable" }   // no account plugin, or signed out
+{ "status": "failed" }        // Platform rejected the query — never a zero balance
+```
 
 ## Install
 
@@ -120,6 +130,7 @@ npm test        # fold + features + regression + render smoke
 |---|---|
 | `test/fold-test.mjs` | fold semantics, fork-correctness, state round-trip, summarize totals |
 | `test/features-test.mjs` | absolute ranges, WoW/YoY comparison, cold-tail folding, route-key parsing |
+| `test/balance-test.mjs` | wallet balance outcome mapping (signed out / failed / ready / cache) |
 | `test/review-check.cjs` | client helpers, closed donut geometry, interaction wiring |
 | `test/client-smoke.cjs` | renders the settings page + popover and asserts on real output |
 
@@ -162,7 +173,7 @@ test/              dependency-free checks (see Development)
 
 ## 入口
 
-1. **侧边栏左下角** —— 设置齿轮上方的柱状图按钮,显示今天总量,点开弹出模型占比环图 + 近 14 天平滑趋势图 + 各模型占比列表 + 一键 CSV 导出。**点击趋势图上的任意一天**(或用键盘聚焦后按 Enter/空格),上方的环形图、图例和模型列表就会平滑过渡到那一天的明细;再次点击或点"清除选择"即可回到近 14 天合计。
+1. **侧边栏左下角** —— 设置齿轮上方的柱状图按钮,显示今天总量,点开弹出模型占比环图 + 近 14 天平滑趋势图 + 各模型占比列表 + DeepSeek 余额 + 一键 CSV 导出。**点击趋势图上的任意一天**(或用键盘聚焦后按 Enter/空格),上方的环形图、图例和模型列表就会平滑过渡到那一天的明细;再次点击或点"清除选择"即可回到近 14 天合计。
 2. **设置 → 使用统计** —— 完整看板:
 
    | 区块 | 内容 |
@@ -186,7 +197,8 @@ test/              dependency-free checks (see Development)
 
 ## 隐私与安全
 
-- **纯本地**。只读本机会话日志,零网络请求,不向任何地方发送数据。
+- **用量数据纯本地**。读取 token 用量只访问本机会话日志,不向任何地方发送。
+- **余额是唯一需要联网的读取**。当 DSH 的 DeepSeek 账户插件存在且已登录时,弹窗会额外显示钱包余额。该数值由**账户插件自身的服务**(`deepseekAccount.getBalance`)通过 DSH 已有的平台认证连接获取——本插件不持有令牌、不直接请求平台、不自建任何网络客户端。没有该依赖或未登录时,这一行只显示"余额不可用"。结果缓存 60 秒。
 - **认证面**。两个 API 路由(`GET /api/token-usage-dashboard/summary` 与 `GET /api/token-usage-dashboard/export`)都在 Harness Web 服务器的连接信任栅栏之后,未认证请求由宿主先行拒绝。
 - **无密钥**。代码不含凭据、不读 `process.env`、无遥测、无远程代码。
 - **不碰对话内容**。聚合只涉及事件类型、`usage` 数值、路由 ID 与时间戳;提示词与回复文本从不被读取、折叠或暴露。

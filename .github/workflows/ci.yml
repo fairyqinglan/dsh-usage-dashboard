@@ -26,6 +26,9 @@ jobs:
       - name: Features (ranges, comparison, cold tail)
         run: node test/features-test.mjs
 
+      - name: Wallet balance outcome mapping
+        run: node test/balance-test.mjs
+
       - name: Render smoke + regression checks (client half)
         run: |
           node test/client-smoke.cjs

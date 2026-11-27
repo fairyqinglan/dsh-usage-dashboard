@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Daily token usage with a per-model breakdown for the DeepSeek Harness",
   "scripts": {
-    "test": "node test/fold-test.mjs && node test/features-test.mjs && node test/review-check.cjs && node test/client-smoke.cjs",
+    "test": "node test/fold-test.mjs && node test/features-test.mjs && node test/balance-test.mjs && node test/review-check.cjs && node test/client-smoke.cjs",
     "check": "node --check index.js && node --check client.js"
   },
   "main": "./index.js",

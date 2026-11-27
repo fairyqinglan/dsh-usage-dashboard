@@ -47,6 +47,10 @@ const COLD_READ_MAX_EVENTS = 20_000
 const REFRESH_BUDGET_MS = 8_000
 /** A refreshed snapshot is reused inside this window unless the caller forces one. */
 const REFRESH_TTL_MS = 15_000
+/** Wallet balance memo lifetime; Platform balance moves slowly, polling it per request is rude. */
+const BALANCE_TTL_MS = 60_000
+/** Client version sent with an account query; the field is required by the seam. */
+const VERSION = '1.1.0'
 
 /** Separator inside a route key; never appears in a provider or model id. */
 const MODEL_SEP = '\u0000'
@@ -509,6 +513,8 @@ export async function apply(ctx) {
   /** In-flight cold refresh, shared by concurrent requests. */
   let refreshing = undefined
   let refreshedAt = 0
+  /** Wallet balance memo; `undefined` means "not read yet". */
+  let balanceCache = undefined
   /** Reads one session's live fold from whichever source this composition provides. */
   let localFold = undefined
 
@@ -668,6 +674,63 @@ export async function apply(ctx) {
   }
 
   /**
+   * Read the signed-in DeepSeek wallet balance, cached briefly so a dashboard
+   * poll does not hit Platform on every refresh. Every failure mode degrades to
+   * an explicit status instead of throwing or inventing a zero balance:
+   * `unavailable` (no account seam / not signed in), `failed` (query rejected),
+   * or a ready value with normal + bonus wallets.
+   * @returns `{ status, wallets, bonusWallets, currency, readAt }`.
+   */
+  async function readBalance() {
+    const now = Date.now()
+    if (balanceCache !== undefined && now - balanceCache.at < BALANCE_TTL_MS) return balanceCache.value
+    // Resolve the seam defensively: a composition without the account plugin
+    // simply has no balance to show, and a throwing lookup must not take the
+    // usage summary down with it.
+    let account
+    try {
+      account = ctx.get('deepseekAccount')
+    } catch {
+      account = undefined
+    }
+    if (account === undefined || typeof account.getBalance !== 'function') {
+      const value = { status: 'unavailable' }
+      balanceCache = { at: now, value }
+      return value
+    }
+    let value
+    try {
+      const details = await account.getBalance({
+        version: VERSION,
+        locale: 'en',
+        timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
+      })
+      if (details === null) {
+        // Signed out (or the grant changed mid-query): nothing to show.
+        value = { status: 'unavailable' }
+      } else if (details.status !== 'ready') {
+        value = { status: 'failed' }
+      } else {
+        const wallets = (details.value ?? []).map(wallet => ({ currency: wallet.currency, balance: wallet.balance }))
+        const bonusWallets = (details.bonusWallets ?? []).map(wallet => ({ currency: wallet.currency, balance: wallet.balance }))
+        value = {
+          status: 'ready',
+          wallets,
+          bonusWallets,
+          currency: wallets[0]?.currency ?? bonusWallets[0]?.currency ?? null,
+          readAt: now,
+        }
+      }
+    } catch (error) {
+      ctx.logger.warn(`usage-dashboard: balance read failed: ${String(error?.message ?? error)}`)
+      value = { status: 'failed' }
+    }
+    // A transient failure is retried sooner than a real balance.
+    balanceCache = { at: now, value }
+    return value
+  }
+
+  /**
    * Build a summary from the query: `days=N` trailing window, or an absolute
    * `from`/`to` range; `compare=1` adds period/year comparisons.
    */
@@ -682,6 +745,9 @@ export async function apply(ctx) {
       const compareDays = Math.min(RETENTION_DAYS, Math.max(1, whole(Number(url.searchParams.get('compareDays'))) || days))
       summary.comparison = comparePeriods(data, compareDays)
     }
+    // The wallet balance is a separate, optional fact: its failure never fails
+    // the usage summary.
+    summary.balance = await readBalance()
     return summary
   }
 

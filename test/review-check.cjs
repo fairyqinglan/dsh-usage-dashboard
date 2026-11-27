@@ -20,6 +20,7 @@ const helpers = [
   slice('function axisDay(day, locale)', 'function fullDay'),
   slice('function fullDay(day, locale)', 'function streaksOf'),
   slice('function donutArcs(models, palette, size = 64, strokeWidth = 8)', '/** Every day from the window start'),
+  slice('function formatMoney(balance, currency, locale)', '/**\n     * Current and longest run'),
 ].join('\n')
 const DAY_MS = 86_400_000
 eval(helpers)
@@ -123,5 +124,15 @@ assert(src.includes("transform: 'rotate(-90 30 30)'"), 'donut ring uses one fixe
 assert(src.includes('aggregateModels([{ day: selectedDay'), 'breakdown narrows to the selected day')
 assert(src.includes('models.length === 0') && src.includes("h(State, { text: t('page.empty') })"), 'empty-day state is handled')
 assert(src.includes('tud-pick-clear') && src.includes("setSelectedDay(null)"), 'selection can be cleared')
+
+// 9. Wallet balance: currency text keeps two decimals and the right symbol, and
+//    the popover handles all three outcome states without inventing a number.
+assert(formatMoney('128.45', 'CNY', 'en') === '¥128.45', `CNY balance formats (got ${formatMoney('128.45', 'CNY', 'en')})`)
+assert(formatMoney('10', 'USD', 'en') === '$10.00', `USD balance pads decimals (got ${formatMoney('10', 'USD', 'en')})`)
+assert(formatMoney('1234567.891', 'CNY', 'en') === '¥1,234,567.89', `large balance groups + keeps precision (got ${formatMoney('1234567.891', 'CNY', 'en')})`)
+assert(formatMoney('', 'CNY', 'en') === '—', 'empty balance reads as an em dash, not zero')
+assert(src.includes("t('panel.balance')") && src.includes('tud-balance'), 'popover renders a balance row')
+assert(src.includes("balance.status === 'unavailable'") && src.includes("balance.status !== 'ready'"),
+  'popover distinguishes signed-out and failed balance states')
 
 console.log(process.exitCode ? 'REGRESSION FAILED' : 'REGRESSION ALL PASS')

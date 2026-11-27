@@ -8,9 +8,13 @@ const assert = (cond, name) => {
 }
 
 const DAY_MS = 86_400_000
-const NOW = Date.parse('2026-11-26T12:00:00Z')
-const OFFSET = 0
-const today = dateKeyOf(NOW, OFFSET)
+// Anchor to the real clock: `summarize` and `comparePeriods` read `Date.now()`
+// and the host timezone, so a fixed calendar date would drift out of the window
+// as days pass and silently flip these assertions.
+const OFFSET = -new Date().getTimezoneOffset()
+const TODAY = dateKeyOf(Date.now(), OFFSET)
+const dayBack = n => dateKeyOf(Date.now() - n * DAY_MS, OFFSET)
+const today = TODAY
 
 /** Build a fold state with a known token count on a single day. */
 function stateOn(day, provider, model, input, output = 0, cacheRead = 0, cacheWrite = 0, calls = 1) {
@@ -42,9 +46,9 @@ function merged(...states) {
 }
 
 // --- 1. Absolute range: summarize with { start, end } instead of { days }. ---
-const dayA = dateKeyOf(NOW - 2 * DAY_MS, OFFSET)
-const dayB = dateKeyOf(NOW - 10 * DAY_MS, OFFSET)
-const dayC = dateKeyOf(NOW - 20 * DAY_MS, OFFSET)
+const dayA = dayBack(2)
+const dayB = dayBack(10)
+const dayC = dayBack(20)
 const state = merged(
   stateOn(dayA, 'p1', 'm1', 100),
   stateOn(dayB, 'p2', 'm2', 200),
@@ -58,9 +62,9 @@ assert(!ranged.models.some(m => m.model === 'm3'), 'absolute range excludes out-
 assert(/^\d{4}-\d{2}-\d{2}$/.test(ranged.today), 'today is a valid day key for absolute range')
 
 // --- 2. Absolute range clamps to retention window. ---
-const ancient = dateKeyOf(NOW - 500 * DAY_MS, OFFSET)
+const ancient = dayBack(500)
 const clamped = summarize([state], { start: ancient, end: today })
-const earliest = dateKeyOf(NOW - 364 * DAY_MS, OFFSET)
+const earliest = dayBack(364)
 assert(clamped.windowStart === earliest || clamped.windowStart > earliest, `ancient start clamped to retention (got ${clamped.windowStart})`)
 
 // --- 3. Absolute range with end before start falls back to today. ---

@@ -56,6 +56,10 @@ window.__ModuleLoader__.load({
         'panel.clear': 'Clear selection',
         'panel.dayView': 'Day view',
         'panel.allView': '14-day total',
+        'panel.balance': 'DeepSeek balance',
+        'panel.bonus': 'Bonus',
+        'panel.balanceUnavailable': 'Sign in to DeepSeek to see your balance',
+        'panel.balanceFailed': 'Balance unavailable',
         'panel.full': 'Full report: Settings → Usage statistics',
         'page.title': 'Usage statistics',
         'page.badge': 'Token usage',
@@ -127,6 +131,10 @@ window.__ModuleLoader__.load({
         'panel.clear': '清除选择',
         'panel.dayView': '单日视图',
         'panel.allView': '近 14 天合计',
+        'panel.balance': 'DeepSeek 余额',
+        'panel.bonus': '赠金',
+        'panel.balanceUnavailable': '登录 DeepSeek 后显示余额',
+        'panel.balanceFailed': '余额读取失败',
         'panel.full': '完整报表：设置 → 使用统计',
         'page.title': '使用统计',
         'page.badge': 'Token 用量',
@@ -275,6 +283,32 @@ window.__ModuleLoader__.load({
         return `${Number(day.slice(0, 4))}年${Number(day.slice(5, 7))}月${Number(day.slice(8, 10))}日`
       }
       return day
+    }
+
+    /**
+     * Wallet amount as currency text. Platform returns decimal strings to keep
+     * server precision, so the value is formatted from the string directly
+     * (never through Number, which would round a large balance).
+     */
+    function formatMoney(balance, currency, locale) {
+      const raw = typeof balance === 'string' ? balance : String(balance ?? '')
+      // An absent/blank balance must not become "¥0.00": Number('') is 0, which
+      // would tell the user their wallet is empty when the value is unknown.
+      if (raw.trim() === '') return '—'
+      const n = Number(raw)
+      if (!Number.isFinite(n)) return raw
+      let shown
+      try {
+        shown = new Intl.NumberFormat(locale, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(n)
+      } catch {
+        shown = n.toFixed(2)
+      }
+      if (currency === 'USD') return `$${shown}`
+      if (currency === 'CNY') return `¥${shown}`
+      return shown
     }
 
     /**
@@ -590,6 +624,14 @@ window.__ModuleLoader__.load({
 .tud-hero-value { color: var(--dsw-alias-label-primary); font-size: 26px; line-height: 1.15; font-weight: 650;
   font-variant-numeric: tabular-nums; }
 .tud-hero-note { color: var(--dsw-alias-label-secondary); font-size: 12px; }
+/* DeepSeek wallet balance row in the popover. */
+.tud-balance { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 10px; padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); }
+.tud-balance-label { color: var(--dsw-alias-label-secondary); font-size: 11px; flex: none; }
+.tud-balance-value { color: var(--dsw-alias-label-primary); font-size: 15px; font-weight: 650;
+  font-variant-numeric: tabular-nums; margin-left: auto; }
+.tud-balance-bonus { color: var(--dsw-alias-label-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.tud-balance-note { color: var(--dsw-alias-label-tertiary); font-size: 11px; margin-left: auto; }
 .tud-caption { margin: 10px 0 6px; color: var(--dsw-alias-label-secondary); font-size: 11px;
   letter-spacing: 0.04em; text-transform: uppercase; }
 
@@ -1054,6 +1096,32 @@ button.tud-heat-cell:hover:not([data-selected]) { transform: scale(1.15); }
                 snapshot.status === 'error'
                   ? h(State, { text: t('page.stale'), onRetry: () => { void store.refresh({ force: true }) }, t })
                   : null,
+                (() => {
+                  const balance = summary.balance
+                  if (balance === undefined) return null
+                  if (balance.status === 'unavailable') {
+                    return h('div', { className: 'tud-balance' },
+                      h('span', { className: 'tud-balance-label' }, t('panel.balance')),
+                      h('span', { className: 'tud-balance-note' }, t('panel.balanceUnavailable')))
+                  }
+                  if (balance.status !== 'ready') {
+                    return h('div', { className: 'tud-balance' },
+                      h('span', { className: 'tud-balance-label' }, t('panel.balance')),
+                      h('span', { className: 'tud-balance-note' }, t('panel.balanceFailed')))
+                  }
+                  const main = (balance.wallets ?? [])[0]
+                  const bonus = (balance.bonusWallets ?? []).reduce((sum, w) => sum + (Number(w.balance) || 0), 0)
+                  return h('div', { className: 'tud-balance' },
+                    h('span', { className: 'tud-balance-label' }, t('panel.balance')),
+                    bonus > 0
+                      ? h('span', { className: 'tud-balance-bonus' },
+                        `${t('panel.bonus')} ${formatMoney(String(bonus), main?.currency ?? balance.currency, locale)}`)
+                      : null,
+                    h('span', { className: 'tud-balance-value' },
+                      main === undefined
+                        ? '—'
+                        : formatMoney(main.balance, main.currency ?? balance.currency, locale)))
+                })(),
                 models.length > 0 ? (() => {
                   const ring = donutArcs(models, palette, 60)
                   // Show the top routes of the *current* view (day or window);
