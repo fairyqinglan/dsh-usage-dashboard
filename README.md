@@ -10,11 +10,11 @@ Zero runtime dependencies. Two plain JavaScript files. No build step.
 
 ## Screenshots
 
-![Usage statistics settings page: summary strip, period comparison, blue activity heatmap and the token distribution ring](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/master/docs/screenshots/01-overview.png)
-![Token activity heatmap with the per-model distribution ring and each model's token spend](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/master/docs/screenshots/02-distribution.png)
-![Sidebar-footer popover with the model-share donut and the 14-day trend chart](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/master/docs/screenshots/03-popover.png)
+![Sidebar-footer popover: today's tokens, the 7-day comparison, the DeepSeek wallet balance, a model-share donut and the 14-day trend chart](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/master/docs/screenshots/01-popover.png)
+![Usage statistics settings page: summary strip, period comparison, blue activity heatmap and the token distribution ring](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/master/docs/screenshots/02-distribution.png)
+![Daily token trend chart and the per-route model table](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/master/docs/screenshots/03-trend-table.png)
 
-*Click a day on the heatmap or the trend chart to update the distribution ring; the blue ladder follows the light/dark theme.*
+*The popover carries your DeepSeek wallet balance. Click a day on the heatmap or the trend chart to update the distribution ring; the blue ladder follows the light/dark theme.*
 
 ## Where to find it
 
@@ -165,11 +165,11 @@ test/              dependency-free checks (see Development)
 
 ## 效果截图
 
-![使用统计设置页:汇总条、周期对比、蓝色活动热力图与 Token 分布环](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/master/docs/screenshots/01-overview.png)
-![Token 活动热力图与按模型分布环,右侧列出每个模型的 token 消耗](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/master/docs/screenshots/02-distribution.png)
-![侧边栏弹窗:模型占比环与近 14 天趋势图](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/master/docs/screenshots/03-popover.png)
+![侧边栏弹窗:今日 token、7 日环比、DeepSeek 余额、模型占比环与近 14 天趋势图](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/master/docs/screenshots/01-popover.png)
+![使用统计设置页:汇总条、周期对比、蓝色活动热力图与 Token 分布环](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/master/docs/screenshots/02-distribution.png)
+![每日 Token 趋势图与按路由的模型明细表](https://raw.githubusercontent.com/fairyqinglan/dsh-usage-dashboard/master/docs/screenshots/03-trend-table.png)
 
-*点击热力图或趋势图上的某一天,分布环即更新为那天的模型占比;蓝色深浅跟随明暗主题自动调整。*
+*弹窗里还显示 DeepSeek 钱包余额。点击热力图或趋势图上的某一天,分布环即更新为那天的模型占比;蓝色深浅跟随明暗主题自动调整。*
 
 ## 入口
 
